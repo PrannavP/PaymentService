@@ -1,0 +1,10 @@
+{
+  "$schema": "https://swc.rs/schema.json",
+  "jsc": {
+    "baseUrl": "."
+  },
+  "module": {
+    "type": "es6",
+    "resolveFully": true
+  }
+}
