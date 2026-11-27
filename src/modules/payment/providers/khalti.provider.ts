@@ -18,7 +18,7 @@ export class KhaltiProvider implements PaymentProviderInterface {
             process.env.IS_PRODUCTION === 'true'
                 ? process.env.KHALTI_PAYMENT_PROD_URL
                 : process.env.KHALTI_PAYMENT_DEV_URL;
-        khaltiUrl = khaltiUrl + '/epayment/initiate';
+        khaltiUrl = khaltiUrl + 'epayment/initiate/';
 
         // if no khalti url is configured, throw an error
         // TODO: later change this error to custom error class
@@ -48,6 +48,7 @@ export class KhaltiProvider implements PaymentProviderInterface {
 
         // store the response in a variable and return it
         const responseData = await response.json();
+        console.log(responseData);
 
         // send the response data to the frontend to redirect the user to the khalti payment page
         // You can use the response data to construct the redirect URL
