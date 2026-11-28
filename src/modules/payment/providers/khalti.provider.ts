@@ -1,84 +1,112 @@
-import { Injectable } from '@nestjs/common';
+import { BadGatewayException, Injectable, Logger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import {
     InitiatePaymentPayload,
+    InitiatePaymentResult,
     PaymentProvider,
     PaymentProviderInterface,
+    VerifyPaymentResult,
 } from '../interface/payment-provider.interface';
 
-// making the class injectable so that it can be injected into other classes
+// shape of the success response returned by Khalti epayment initiate API
+interface KhaltiInitiateResponse {
+    pidx: string;
+    payment_url: string;
+    expires_at?: string;
+    expires_in?: number;
+};
+
 @Injectable()
 export class KhaltiProvider implements PaymentProviderInterface {
+    // mark this provider as Khalti
     readonly method = PaymentProvider.KHALTI;
 
-    async initiatePayment(payload: InitiatePaymentPayload): Promise<any> {
-        // call the khalti api to initiate the payment and return the response
+    // logger for Khalti API calls and errors
+    private readonly logger = new Logger(KhaltiProvider.name);
 
-        // store the khalti url in a variable and use it to make the api call
-        let khaltiUrl =
-            process.env.IS_PRODUCTION === 'true'
-                ? process.env.KHALTI_PAYMENT_PROD_URL
-                : process.env.KHALTI_PAYMENT_DEV_URL;
-        khaltiUrl = khaltiUrl + 'epayment/initiate/';
+    // inject ConfigService so we can safely read env variables
+    constructor(private readonly configService: ConfigService) {}
 
-        // if no khalti url is configured, throw an error
-        // TODO: later change this error to custom error class
-        if (!khaltiUrl) {
-            throw new Error('Khalti payment URL is not configured');
-        }
 
-        // format the payload to match the khalti api requirements
-        const formattedPayload = {
-            amount: parseFloat(payload.amount.toFixed(2)) * 100, // khalti api requires the amount in paisa, so multiply by 100
-            success_url: payload.success_url,
-            failure_url: payload.failure_url,
-            return_url: 'http://localhost:5173/payment/khalti/verify', // TODO: later change this to the actual return url
-            website_url: 'http://localhost:5173/', // TODO: later change this to the actual website url
-            purchase_order_id: payload.purchase_order_id,
-            purchase_order_name: payload.purchase_order_name,
+    async initiatePayment(payload: InitiatePaymentPayload, transactionId: string): Promise<InitiatePaymentResult> {
+        // check if the app is running in production mode
+        const isProduction = this.configService.get<string>('IS_PRODUCTION') === 'true';
+
+        // pick the right Khalti base URL based on environment
+        const baseUrl = this.configService.getOrThrow<string>(
+            isProduction ? 'KHALTI_PAYMENT_PROD_URL' : 'KHALTI_PAYMENT_DEV_URL',
+        );
+
+        // read the Khalti secret key from env
+        const secretKey = this.configService.getOrThrow<string>(
+            'KHALTI_LIVE_SECRET_KEY',
+        );
+
+        // build the full initiate endpoint without double slashes
+        const khaltiUrl = `${baseUrl.replace(/\/$/, '')}/epayment/initiate/`;
+
+        // convert amount to paisa (integer) because Khalti requires paisa
+        const amountInPaisa = Math.round(payload.amount * 100);
+
+        // prepare request body according to Khalti API format
+        const khaltiPayload = {
+            amount: amountInPaisa,
+            return_url: payload.return_url || 'http://localhost:5173/payment/verify',
+            website_url: payload.website_url || 'http://localhost:5173/',
+            purchase_order_id: payload.purchase_order_id || transactionId,
+            purchase_order_name: payload.purchase_order_name || 'Payment',
+            ...(payload.customer_name || payload.customer_email
+                ? {
+                      customer_info: {
+                          name: payload.customer_name,
+                          email: payload.customer_email,
+                      },
+                  }
+                : {}),
         };
 
+        // send POST request to Khalti initiate endpoint
         const response = await fetch(khaltiUrl, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
-                Authorization: 'Key ' + process.env.KHALTI_LIVE_SECRET_KEY,
+                Authorization: `Key ${secretKey}`,
             },
-            body: JSON.stringify(formattedPayload),
+            body: JSON.stringify(khaltiPayload),
         });
 
-        // store the response in a variable and return it
-        const responseData = await response.json();
-        console.log(responseData);
+        // parse the JSON body returned by Khalti
+        const responseData = (await response.json()) as KhaltiInitiateResponse;
 
-        // send the response data to the frontend to redirect the user to the khalti payment page
-        // You can use the response data to construct the redirect URL
-        // For example, you can use the `payment_url` from the response to redirect the user
+        if (!response.ok) {
+            this.logger.error(
+                `Khalti initiate failed (${response.status}): ${JSON.stringify(responseData)}`,
+            );
+            throw new BadGatewayException('Failed to initiate Khalti payment');
+        }
 
-        const redirectUrl = responseData.payment_url;
+        this.logger.log(
+            `Khalti payment initiated for transaction ${transactionId} (pidx: ${responseData.pidx})`,
+        );
 
-        // the success response of khalti looks like this:
-        // {
-        //     "pidx": "bZQLD9wRVWo4CdESSfuSsB",
-        //     "payment_url": "https://test-pay.khalti.com/?pidx=bZQLD9wRVWo4CdESSfuSsB",
-        //     "expires_at": "2023-05-25T16:26:16.471649+05:45",
-        //     "expires_in": 1800
-        // }
-
-
-        return responseData;
-
-        // return await response.json();
+        // return a standard result so callers do not depend on Khalti-specific keys
+        return {
+            transactionId,
+            provider: this.method,
+            providerRef: responseData.pidx,
+            paymentUrl: responseData.payment_url,
+            expiresAt: responseData.expires_at,
+            rawResponse: responseData,
+        };
     }
 
-    async verifyPayment(paymentId: string): Promise<any> {
-        // Implement the logic to verify a payment with Khalti
-        // You can use Khalti's API to verify the payment status
-        // Return the response from Khalti's API
+    async verifyPayment(_paymentId: string): Promise<VerifyPaymentResult> {
+        // TODO: call Khalti /epayment/lookup/ API to verify payment status
+        throw new Error('Khalti verifyPayment is not implemented yet');
     }
 
-    async refundPayment(paymentId: string, amount: number): Promise<any> {
-        // Implement the logic to refund a payment with Khalti
-        // You can use Khalti's API to initiate a refund request
-        // Return the response from Khalti's API
+    async refundPayment(_paymentId: string, _amount: number): Promise<unknown> {
+        // TODO: implement Khalti refund API call if needed
+        throw new Error('Khalti refundPayment is not implemented yet');
     }
 }

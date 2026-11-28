@@ -43,4 +43,17 @@ export class ProducerDto {
         example: 'Test Product',
     })
     purchase_order_name?: string;
+
+    // customer details
+    @ApiProperty({
+        description: 'Customer name',
+        example: 'John Doe',
+    })
+    customer_name: string;
+    
+    @ApiProperty({
+        description: 'Customer email',
+        example: 'john.doe@example.com',
+    })
+    customer_email: string;
 }

@@ -1,54 +1,62 @@
+import { ConsoleLogger } from '@nestjs/common';
+import { ConfigService } from '@nestjs/config';
 import { NestFactory } from '@nestjs/core';
-import { AppModule } from './app.module';
-import { ConsoleLogger, ValidationPipe } from '@nestjs/common';
+import { MicroserviceOptions, Transport } from '@nestjs/microservices';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import { AppModule } from './app.module';
 
 async function bootstrap() {
-    // create the NestJS application using the AppModule
+    // create the main NestJS HTTP application
     const app = await NestFactory.create(AppModule, {
         logger: new ConsoleLogger(),
     });
 
-    // use the ValidationPipe globally to validate incoming requests
-    // for now commented out this global validation pipe, because it is causing issues with the swagger documentation.
-    // we dont know what data needs to be sent to the payment provider, so we will not validate the incoming request for now.
-    // app.useGlobalPipes(
-    //     new ValidationPipe({
-    //         whitelist: true,
-    //         forbidNonWhitelisted: true,
-    //         transform: true,
-    //     }),
-    // );
+    // get ConfigService to safely read values from .env
+    const configService = app.get(ConfigService);
 
-    // swagger doc configuration
+    // read port (defaults to 7002 if PORT is not set in .env)
+    const port = configService.get<number>('PORT') ?? 7002;
+
+    // read RabbitMQ connection string from .env
+    const rabbitMqUrl = configService.getOrThrow<string>(
+        'RABBITMQ_CONNECTION_STRING',
+    );
+
+    // attach RabbitMQ microservice listener so this app can consume queue messages
+    app.connectMicroservice<MicroserviceOptions>({
+        transport: Transport.RMQ,
+        options: {
+            urls: [rabbitMqUrl],
+            queue: 'subscription_plan_queue',
+            queueOptions: {
+                // keep queue alive across RabbitMQ restarts
+                durable: true,
+            },
+        },
+    });
+
+    // configure Swagger API documentation
     const swaggerConfig = new DocumentBuilder()
         .setTitle('Payment Service API')
         .setDescription('Payment Service API documentation.')
         .setVersion('1.0.0')
-        // .addBearerAuth(
-        // {
-        // 	type: 'http',
-        // 	scheme: 'bearer',
-        // 	bearerFormat: 'JWT',
-        // 	name: 'JWT',
-        // 	description: 'Enter JWT token',
-        // 	in: 'header',
-        // },
-        // 'JWT-auth', // This name must match the decorator exactly
-        // )
         .build();
 
+    // mount Swagger UI at /swagger
     const documentFactory = () =>
         SwaggerModule.createDocument(app, swaggerConfig);
     SwaggerModule.setup('/swagger', app, documentFactory);
 
-    console.info(`Server running on port ${process.env.PORT ?? 7002}`);
-    console.log(
-        `Swagger UI is running on http://localhost:${process.env.PORT || 7002}/swagger `,
-    );
+    // start RabbitMQ microservice listeners
+    await app.startAllMicroservices();
 
-    // run and listen the app on port 7002 if env file PORT does not exists.
-    await app.listen(process.env.PORT ?? 7002);
+    // start the HTTP server
+    await app.listen(port);
+
+    // log server and Swagger URLs
+    console.info(`Server running on http://localhost:${port}`);
+    console.info(`Swagger UI running on http://localhost:${port}/swagger`);
 }
 
-bootstrap();
+// start the application
+void bootstrap();

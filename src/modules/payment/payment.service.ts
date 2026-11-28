@@ -1,33 +1,49 @@
-import { Injectable } from '@nestjs/common';
+import { BadRequestException, Injectable } from '@nestjs/common';
 import { v4 as uuidv4 } from 'uuid';
-import { PaymentProvider, InitiatePaymentPayload } from '../payment/interface/payment-provider.interface';
+import {
+    InitiatePaymentPayload,
+    InitiatePaymentResult,
+    PaymentProvider,
+} from './interface/payment-provider.interface';
 import { KhaltiProvider } from './providers/khalti.provider';
 
 @Injectable()
 export class PaymentService {
-    // payment method intiate method
-    // todo: for now promise returns any, later we will define a proper interface for the response of the payment provider.
-    async initiatePayment(payload: InitiatePaymentPayload, paymentMethod: string): Promise<any> {
-        // validate the payment method
-        if (!Object.values(PaymentProvider).includes(paymentMethod as PaymentProvider)) {
-            throw new Error(`Invalid payment method: ${paymentMethod}`);
-        };
+    // inject supported payment providers through NestJS DI
+    constructor(private readonly khaltiProvider: KhaltiProvider) {}
 
-        // generate a unique transaction id for the payment
+    // initiate a payment using the requested payment method
+    async initiatePayment(
+        payload: InitiatePaymentPayload,
+        paymentMethod: string,
+    ): Promise<InitiatePaymentResult> {
+        // check if the given payment method is in our supported enum
+        const isValidMethod = Object.values(PaymentProvider).includes(
+            paymentMethod as PaymentProvider,
+        );
+        if (!isValidMethod) {
+            throw new BadRequestException(
+                `Invalid payment method: ${paymentMethod}`,
+            );
+        }
+
+        // generate a unique internal transaction id for tracking
         const transactionId = uuidv4();
 
-        // call the respective payment provider according to payment method.
+        // route the request to the matching payment provider
         switch (paymentMethod) {
             case PaymentProvider.KHALTI:
-                // call Khalti provider from providers
-                const khaltiProvider = new KhaltiProvider();
+                // call Khalti provider and return the normalized result
+                return await this.khaltiProvider.initiatePayment(
+                    payload,
+                    transactionId,
+                );
 
-                // initiate the payment with the khalti provider and return the response
-                return await khaltiProvider.initiatePayment(payload);
-
-                break;
             default:
-                throw new Error(`Unsupported payment method: ${paymentMethod}`);
-        };
-    };
-};
+                // throw 400 if provider exists in enum but is not implemented yet
+                throw new BadRequestException(
+                    `Unsupported payment method: ${paymentMethod}`,
+                );
+        }
+    }
+}
