@@ -3,7 +3,10 @@ import { Test, TestingModule } from '@nestjs/testing';
 import { vi } from 'vitest';
 import { PaymentService } from './payment.service';
 import { KhaltiProvider } from './providers/khalti.provider';
-import { PaymentProvider } from './interface/payment-provider.interface';
+import {
+    PaymentProvider,
+    PaymentStatus,
+} from './interface/payment-provider.interface';
 
 describe('PaymentService', () => {
     let service: PaymentService;
@@ -37,8 +40,8 @@ describe('PaymentService', () => {
         expect(service).toBeDefined();
     });
 
-    it('should call KhaltiProvider and return normalized result', async () => {
-        // arrange a fake Khalti response
+    it('should call KhaltiProvider and return normalized initiate result', async () => {
+        // arrange a fake Khalti initiate response
         const expectedResult = {
             transactionId: 'tx-123',
             provider: PaymentProvider.KHALTI,
@@ -61,15 +64,49 @@ describe('PaymentService', () => {
         expect(result).toEqual(expectedResult);
     });
 
+    it('should call KhaltiProvider and return normalized verify result', async () => {
+        // arrange a fake Khalti verify response
+        const expectedResult = {
+            provider: PaymentProvider.KHALTI,
+            providerRef: 'pidx-123',
+            transactionId: 'khalti-tx-1',
+            status: PaymentStatus.COMPLETED,
+            amount: 1000,
+            fee: 0,
+            refunded: false,
+        };
+        mockKhaltiProvider.verifyPayment.mockResolvedValue(expectedResult);
+
+        // act
+        const result = await service.verifyPayment(
+            'pidx-123',
+            PaymentProvider.KHALTI,
+        );
+
+        // assert provider lookup was called with the paymentId
+        expect(mockKhaltiProvider.verifyPayment).toHaveBeenCalledWith(
+            'pidx-123',
+        );
+        expect(result).toEqual(expectedResult);
+    });
+
     it('should throw BadRequestException for an invalid payment method', async () => {
         await expect(
             service.initiatePayment({ amount: 1000 }, 'unknown_gateway'),
+        ).rejects.toThrow(BadRequestException);
+
+        await expect(
+            service.verifyPayment('pidx-123', 'unknown_gateway'),
         ).rejects.toThrow(BadRequestException);
     });
 
     it('should throw BadRequestException for an unimplemented provider', async () => {
         await expect(
             service.initiatePayment({ amount: 1000 }, PaymentProvider.ESEWA),
+        ).rejects.toThrow(BadRequestException);
+
+        await expect(
+            service.verifyPayment('pidx-123', PaymentProvider.ESEWA),
         ).rejects.toThrow(BadRequestException);
     });
 });
