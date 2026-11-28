@@ -6,11 +6,12 @@ export enum PaymentProvider {
     STRIPE = 'stripe',
 };
 
-// possible states of a payment transaction
+// possible states of a payment transaction across all providers
 export enum PaymentStatus {
     PENDING = 'PENDING',
     COMPLETED = 'COMPLETED',
     FAILED = 'FAILED',
+    CANCELED = 'CANCELED',
     EXPIRED = 'EXPIRED',
     REFUNDED = 'REFUNDED',
 };
@@ -26,6 +27,7 @@ export interface InitiatePaymentPayload {
     purchase_order_name?: string;
     customer_name?: string;
     customer_email?: string;
+    customer_phone?: string;
 };
 
 // standard response returned by any payment provider after initiating payment
@@ -42,8 +44,11 @@ export interface InitiatePaymentResult {
 export interface VerifyPaymentResult {
     provider: PaymentProvider;
     providerRef: string;
+    transactionId: string | null;
     status: PaymentStatus;
     amount: number;
+    fee?: number;
+    refunded?: boolean;
     rawResponse?: unknown;
 };
 
@@ -55,7 +60,7 @@ export interface PaymentProviderInterface {
     // start a payment and return a redirect payment URL
     initiatePayment(payload: InitiatePaymentPayload, transactionId: string): Promise<InitiatePaymentResult>;
 
-    // verify payment status directly with the provider
+    // verify payment status directly with the provider and return a standard result
     verifyPayment(paymentId: string): Promise<VerifyPaymentResult>;
 
     // optional refund method for providers that support refunds
