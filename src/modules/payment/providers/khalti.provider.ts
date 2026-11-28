@@ -75,7 +75,7 @@ export class KhaltiProvider implements PaymentProviderInterface {
                 payload.customer_phone,
         );
 
-        // prepare request body according to Khalti KPG-2 docs
+        // prepare request body according to Khalti
         const khaltiPayload = {
             amount: amountInPaisa,
             return_url:
